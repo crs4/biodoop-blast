@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<configuration>
+
+  <property>
+    <name>hadoop.pipes.executable</name>
+    <value>pipes-bin/blastall</value>
+  </property>
+
+  <property>
+    <name>bl.mr.seq.blastall.log.level</name>
+    <value>DEBUG</value>
+    <description>logging level, specified as a logging module literal;
+    defaults to 'WARNING'</description>
+  </property>
+
+  <property>
+    <name>bl.mr.seq.blastall.db.name</name>
+    <value>hg18</value>
+    <description>The BLAST database name (REQUIRED). A BLAST db is
+    typically obtained by running the formatdb command on one or more
+    fasta files. The archive provided through mapred.cache.archives
+    MUST contain BLAST db files beginning with the db name
+    (DB_NAME.nin, etc.)</description>
+  </property>
+
+  <property>
+    <name>bl.mr.seq.blastall.program</name>
+    <value>blastn</value>
+    <description> The BLAST program to use ('blastn', 'blastp',
+    etc.); defaults to 'blastn'</description>
+  </property>
+
+  <property>
+    <name>mapred.cache.archives</name>
+    <value>hg18.tgz#hg18</value>
+    <description>distributed cache entry (HDFS_PATH#LINK_NAME) for an
+    archive containing the pre-formatted db files at the top level,
+    i.e., no directories</description>
+  </property>
+
+
+  <!-- The following parameters should be left alone -->
+  <property>
+    <name>mapred.create.symlink</name>
+    <value>yes</value>
+  <description>must be set to 'yes'</description>
+  </property>
+
+  <property>
+    <name>hadoop.pipes.java.recordreader</name>
+    <value>false</value>
+  </property>
+
+  <property>
+    <name>hadoop.pipes.java.recordwriter</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>mapred.reduce.tasks</name>
+    <value>0</value>
+  </property>
+
+</configuration>
