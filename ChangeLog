@@ -1,0 +1,4 @@
+2011-07-18    <simleo@neuron.crs4.it>
+
+	* bl/blast/mr/blastall: changed to expect one-sequence-per-line input.
+

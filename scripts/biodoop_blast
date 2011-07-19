@@ -1,0 +1,307 @@
+#!/usr/bin/env python
+# BEGIN_COPYRIGHT
+# END_COPYRIGHT
+
+"""
+Runs the Hadoop implementation of BLAST.
+
+The first argument is the local path of input sequences in FASTA
+format (file or dir); the second one is the local path of the archive
+containing, at the TOP level, BLAST db files beginning with the db
+name (-d option).
+
+Options can be provided through the 'biodoop_blast.cfg' file, which is
+looked for in the current directory. Example:
+
+[general]
+log_level: DEBUG
+
+[hadoop]
+blast_mappers: 16
+
+[blast]
+blast_db: mm9
+
+Note that option names are command line long option names with dashes
+replaced by underscores. A command line option overrides its
+corresponding configuration file option.
+
+Also note that, since it exports the current environment to the pipes
+launchers, this script should be launched on a task tracker node or
+on a machine with the same environment.
+"""
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+import sys, os, optparse, ConfigParser, uuid
+import subprocess as sp
+import pydoop.utils as pu
+import pydoop.hdfs as hdfs
+
+CONFIG_FILE = "biodoop_blast.cfg"
+
+DEFAULTS = {
+  "log_level": "WARNING",
+  "output_file": "blastall_hits.tsv",
+  #--
+  "hadoop": "/opt/hadoop/bin/hadoop",
+  "hadoop_conf_dir": os.getenv(
+    "HADOOP_CONF_DIR",
+    os.path.join(os.getenv("HADOOP_HOME", "/opt/hadoop"), "conf")
+    ),
+  "f2t_mappers": 1,
+  "blast_mappers": 1,
+  #--
+  "blastall": "/usr/bin/blastall",
+  "blast_prog": "blastn",
+  "blast_db": "hg19",
+  "blast_evalue": 1.0,
+  "blast_gap_cost": 1,
+  "blast_word_size": 20,
+  "blast_filters": False,
+}
+
+F2T_BASE_MR_OPT = {
+  "mapred.job.name": "fasta2tab",
+  "hadoop.pipes.java.recordreader": "false",
+  "hadoop.pipes.java.recordwriter": "true",
+  "mapred.map.tasks": str(DEFAULTS["f2t_mappers"]),
+  "mapred.reduce.tasks": "0",
+  }
+
+BLAST_BASE_MR_OPT = {
+  "mapred.job.name": "biodoop_blast",
+  "hadoop.pipes.java.recordreader": "true",
+  "hadoop.pipes.java.recordwriter": "true",
+  "mapred.create.symlink": "yes",
+  "mapred.map.tasks": str(DEFAULTS["blast_mappers"]),
+  "mapred.reduce.tasks": "0",
+  }
+
+
+class Opt(object):
+  def update(self, other):
+    new_values = dict((k, v) for (k, v) in other.__dict__.iteritems()
+                      if v is not None)
+    self.__dict__.update(new_values)
+
+
+def write_launcher(outf, app_module):
+  outf.write('#!/bin/bash\n')
+  outf.write('""":"\n')
+  for item in os.environ.iteritems():
+    outf.write('export %s="%s"\n' % item)
+  outf.write('exec python -u $0 $@\n')
+  outf.write('":"""\n')
+  outf.write('from %s import run_task\n' % app_module)
+  outf.write('run_task()\n')
+
+
+def build_d_options(opt_dict):
+  d_options = []
+  for name, value in opt_dict.iteritems():
+    d_options.append("-D %s=%s" % (name, value))
+  return " ".join(d_options)
+
+
+def hadoop_pipes(pipes_opts, opt):
+  logger = logging.getLogger("hadoop_pipes")
+  logger.setLevel(opt.log_level)
+  cmd = "%s --config %s pipes %s" % (
+    opt.hadoop, opt.hadoop_conf_dir, pipes_opts
+    )
+  logger.debug("cmd: %s" % cmd)
+  p = sp.Popen(cmd, shell=True)
+  return os.waitpid(p.pid, 0)[1]
+
+
+class HelpFormatter(optparse.IndentedHelpFormatter):
+  def format_description(self, description):
+    return description + "\n" if description else ""
+
+
+def make_parser():
+  parser = optparse.OptionParser(
+    usage="%prog [OPTIONS] INPUT DB_ARCHIVE",
+    formatter=HelpFormatter(),
+    )
+  parser.set_description(__doc__.lstrip())
+  add_hadoop_optgroup(parser)
+  add_blast_optgroup(parser)
+  parser.add_option("-o", "--output-file", type="str", metavar="STRING",
+                    help="output file")
+  parser.add_option("--log-level", type="str", metavar="STRING",
+                    help="log level as a logging module literal")
+  parser.add_option("--show-defaults", action="store_true",
+                    help="show options defaults and exit")
+  #parser.set_defaults(**DEFAULTS)
+  return parser
+
+
+def add_hadoop_optgroup(parser):
+  optgroup = optparse.OptionGroup(parser, "Hadoop Options")
+  optgroup.add_option("--hadoop", type="str", metavar="STRING",
+                      help="Hadoop executable")
+  optgroup.add_option("--hadoop-conf-dir", type="str", metavar="STRING",
+                      help="Hadoop configuration directory")
+  optgroup.add_option("--f2t-mappers", type="int", metavar="INT",
+                      help="n. mappers for fasta2tab")
+  optgroup.add_option("--blast-mappers", type="int", metavar="INT",
+                      help="n. mappers for blast")
+  parser.add_option_group(optgroup)
+
+
+def add_blast_optgroup(parser):
+  optgroup = optparse.OptionGroup(parser, "BLAST Options")
+  optgroup.add_option("--blastall", type="str", metavar="STRING",
+                      help="Blastall executable")
+  optgroup.add_option("-p", "--blast-prog", type="str", metavar="STRING",
+                      help="BLAST program")
+  optgroup.add_option("-d", "--blast-db", type="str", metavar="STRING",
+                      help="BLAST database")
+  optgroup.add_option("-e", "--blast-evalue", type="float", metavar="FLOAT",
+                      help="BLAST expectation value")
+  optgroup.add_option("-g", "--blast-gap-cost", type="int", metavar="INT",
+                      help="BLAST gap opening cost")
+  optgroup.add_option("-w", "--blast-word-size", type="int", metavar="INT",
+                      help="BLAST word size")
+  optgroup.add_option("-F", "--blast-filters", action="store_true",
+                      help="BLAST filters [False]")
+  parser.add_option_group(optgroup)
+
+
+def get_cfg_opt(defaults, config_file):
+  opt = Opt()
+  config = ConfigParser.SafeConfigParser(defaults)
+  config.read(config_file)
+  if config.has_section("general"):
+    opt.log_level = getattr(logging, config.get("general", "log_level"))
+  if config.has_section("hadoop"):
+    for name in "hadoop", "hadoop_conf_dir":
+      setattr(opt, name, config.get("hadoop", name))
+    for name in "f2t_mappers", "blast_mappers":
+      setattr(opt, name, config.getint("hadoop", name))
+  if config.has_section("blast"):
+    for name in "blastall", "blast_prog", "blast_db":
+      setattr(opt, name, config.get("blast", name))
+    for name in "blast_gap_cost", "blast_word_size":
+      setattr(opt, name, config.getint("blast", name))
+    opt.blast_evalue = config.getfloat("blast", "blast_evalue")
+    opt.blast_filters = config.getboolean("blast", "blast_filters")
+  return opt
+
+
+def update_blast_options(mr_opt, opt):
+  mr_opt["bl.mr.seq.blastall.exe"] = opt.blastall
+  mr_opt["bl.mr.seq.blastall.program"] = opt.blast_prog
+  mr_opt["bl.mr.seq.blastall.db.name"] = opt.blast_db
+  mr_opt["bl.mr.seq.blastall.evalue"] = opt.blast_evalue
+  mr_opt["bl.mr.seq.blastall.gap.cost"] = opt.blast_gap_cost
+  mr_opt["bl.mr.seq.blastall.word.size"] = opt.blast_word_size
+  mr_opt["bl.mr.seq.blastall.filter"] = 'true' if opt.blast_filters else 'false'
+
+
+def run_f2t(fs, lfs, input_local, output_hdfs, opt):
+  logger = logging.getLogger("run_f2t")
+  logger.setLevel(opt.log_level)
+  input_hdfs = os.path.basename(input_local)
+  for d in input_hdfs, output_hdfs:
+    if fs.exists(d):
+      fs.delete(d)
+  lfs.copy(input_local, fs, input_hdfs)  
+  f2t_launcher_hdfs = str(uuid.uuid4())
+  with fs.open_file(f2t_launcher_hdfs, "w") as outf:
+    write_launcher(outf, "bl.core.seq.mr.fasta2tab")
+  mr_opt = {}
+  mr_opt.update(F2T_BASE_MR_OPT)
+  mr_opt["mapred.map.tasks"] = opt.f2t_mappers
+  d_options = build_d_options(mr_opt)
+  logger.info("running fasta2tab, launcher='%s'" % f2t_launcher_hdfs)
+  hadoop_pipes("%s -program %s -input %s -output %s" % (
+    d_options, f2t_launcher_hdfs, input_hdfs, output_hdfs
+    ), opt)
+
+
+def run_blast(fs, lfs, input_hdfs, db_archive, opt):
+  logger = logging.getLogger("run_blast")
+  logger.setLevel(opt.log_level)
+  output_hdfs = str(uuid.uuid4())
+  blast_launcher_hdfs = str(uuid.uuid4())
+  with fs.open_file(blast_launcher_hdfs, "w") as outf:
+    write_launcher(outf, "bl.blast.mr.blastall")
+  db_archive_hdfs = os.path.basename(db_archive)
+  if not fs.exists(db_archive_hdfs):  # note that this is the only exception
+    logger.info("uploading %r" % db_archive)
+    lfs.copy(db_archive, fs, db_archive_hdfs)
+  else:
+    logger.warn("using hdfs-cached db, remove it manually to replace it")
+  mr_opt = {}
+  mr_opt.update(BLAST_BASE_MR_OPT)
+  mr_opt["mapred.cache.archives"] = "%s#%s" % (db_archive_hdfs, opt.blast_db)
+  mr_opt["mapred.map.tasks"] = opt.blast_mappers
+  update_blast_options(mr_opt, opt)
+  d_options = build_d_options(mr_opt)
+  logger.info("running blastall, launcher='%s'" % blast_launcher_hdfs)
+  hadoop_pipes("%s -program %s -input %s -output %s" % (
+    d_options, blast_launcher_hdfs, input_hdfs, output_hdfs
+    ), opt)
+  collect_output(fs, output_hdfs, opt)
+
+
+def collect_output(fs, output_hdfs, opt):
+  logger = logging.getLogger("collect_output")
+  logger.setLevel(opt.log_level)
+  output_paths = [d["name"] for d in fs.list_directory(output_hdfs)
+                  if d["name"].rsplit("/", 1)[1].startswith("part")]
+  logger.info("there are %d output files" % len(output_paths))
+  with open(opt.output_file, "w") as outf:
+    for p in output_paths:
+      with hdfs.open(p) as f:
+        for line in f:
+          outf.write(line)
+
+
+def main(argv):
+  
+  parser = make_parser()
+  cl_opt, args = parser.parse_args()
+  if cl_opt.show_defaults:
+    for item in DEFAULTS.iteritems():
+      print "%s: %s" % item
+    sys.exit(0)
+  try:
+    input_ = args[0]
+    db_archive = args[1]
+  except IndexError:
+    parser.print_help()
+    sys.exit(2)
+  if cl_opt.log_level is not None:
+    try:
+      cl_opt.log_level = getattr(logging, cl_opt.log_level)
+    except AttributeError:
+      raise ValueError("Unsupported log level: %r" % cl_opt.log_level)
+
+  opt = get_cfg_opt(DEFAULTS, CONFIG_FILE)
+  opt.update(cl_opt)
+  
+  logger = logging.getLogger("main")
+  if opt.hadoop_conf_dir:
+    os.environ["HADOOP_CONF_DIR"] = opt.hadoop_conf_dir
+    reload(hdfs)
+  
+  hostname, port, _ = pu.split_hdfs_path(input_)
+  fs = hdfs.hdfs(hostname, port)
+  lfs = hdfs.hdfs("", 0)
+
+  try:
+    input_tsv = str(uuid.uuid4())
+    run_f2t(fs, lfs, input_, input_tsv, opt)
+    run_blast(fs, lfs, input_tsv, db_archive, opt)
+    fs.delete(input_tsv)
+  finally:
+    lfs.close()
+    fs.close()
+
+
+if __name__ == "__main__":
+  main(sys.argv)

@@ -1,17 +1,18 @@
 # BEGIN_COPYRIGHT
 # END_COPYRIGHT
-"""Hadoop BLAST
+"""Biodoop BLAST
 
 A wrapper-based MapReduce implementation of BLAST for Hadoop.
 """
-import os
+import os, datetime
 from distutils.core import setup
 from distutils.errors import DistutilsSetupError
 from distutils.command.build_py import build_py as du_build_py
 from distutils.command.sdist import sdist as du_sdist
 
+CURRENT_YEAR = datetime.datetime.now().year
 
-NAME = 'bl-blast'
+NAME = 'biodoop-blast'
 DESCRIPTION, LONG_DESCRIPTION = __doc__.split("\n", 1)
 LONG_DESCRIPTION = LONG_DESCRIPTION.strip()
 URL = "http://biodoop.sourceforge.net"
@@ -57,6 +58,15 @@ def write_authors(filename="AUTHORS"):
       f.write(" * %s <%s>\n" % (name, email))
 
 
+def write_readme(filename="README"):
+  if os.path.exists(filename) and mtime(__file__) <= mtime(filename):
+    return
+  with open(filename, "w") as f:
+    f.write("%s\n" % DESCRIPTION)
+    f.write("%s\n\n" % ("=" * len(DESCRIPTION)))
+    f.write("Copyright %d CRS4. Docs are in docs/html.\n" % CURRENT_YEAR)
+
+
 def write_version(filename="bl/blast/version.py"):
   if os.path.exists(filename) and mtime("VERSION") <= mtime(filename):
     return
@@ -68,6 +78,7 @@ def write_version(filename="bl/blast/version.py"):
 class build_py(du_build_py):
   def run(self):
     write_version()
+    write_readme()
     du_build_py.run(self)
 
 

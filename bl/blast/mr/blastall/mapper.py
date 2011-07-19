@@ -1,6 +1,6 @@
 # BEGIN_COPYRIGHT
 # END_COPYRIGHT
-import os, logging, zlib
+import os, logging
 logging.basicConfig(level=logging.DEBUG)
 
 import pydoop.pipes as pp
@@ -10,11 +10,12 @@ from bl.core.seq.engines.blastall_2_2_21 import Engine
 
 class Mapper(pp.Mapper):
   """
-  Maps query sequences to blastall results.
+  Maps query sequences to blastall hits.
 
-  @input-record: C{key} = fasta header, C{value} = sequence.
+  @input-record: C{key} does not matter (LineRecordReader), C{value} =
+  whole sequence as <HEADER>\t<SEQUENCE>
 
-  @output-record: tabular result of blastall against the specified db.
+  @output-record: tabular blastall hit against the specified db.
 
   @jobconf-param: C{bl.mr.seq.blastall.log.level} logging level,
   specified as a logging module literal; defaults to 'WARNING'.
@@ -43,13 +44,17 @@ class Mapper(pp.Mapper):
       self.log_level = getattr(logging, self.log_level)
     except AttributeError:
       raise ValueError("Unsupported log level: %r" % self.log_level)
+    pu.jc_configure(self, jc, 'bl.mr.seq.blastall.exe',
+                    'blastall_exe', '/usr/bin/blastall')
     pu.jc_configure(self, jc, 'bl.mr.seq.blastall.program',
                     'program', 'blastn')
     pu.jc_configure(self, jc, 'bl.mr.seq.blastall.db.name', 'db_name')
-    pu.jc_configure_bool(self, jc, 'bl.mr.fasta-reader.compress.header',
-                         'compress_header', False)
-    pu.jc_configure_bool(self, jc, 'bl.mr.fasta-reader.compress.seq',
-                         'compress_seq', True)
+    pu.jc_configure_float(self, jc, 'bl.mr.seq.blastall.evalue', 'evalue', 1.0)
+    pu.jc_configure_int(self, jc, 'bl.mr.seq.blastall.gap.cost', 'gap_cost', 1)
+    pu.jc_configure_int(self, jc, 'bl.mr.seq.blastall.word.size',
+                        'word_size', 20)
+    pu.jc_configure_bool(self, jc, 'bl.mr.seq.blastall.filter',
+                        'filter', False)
 
   def __init__(self, ctx):
     super(Mapper, self).__init__(ctx)
@@ -63,7 +68,7 @@ class Mapper(pp.Mapper):
     self.output_file = "temp.out"
     engine_logger = logging.getLogger("blastall")
     engine_logger.setLevel(self.log_level)
-    self.engine = Engine(logger=engine_logger)
+    self.engine = Engine(exe_file=self.blastall_exe, logger=engine_logger)
     try:
       self.db_dir = jc.get("mapred.cache.archives").split(",")[0].split("#")[1]
     except IndexError:
@@ -74,15 +79,14 @@ class Mapper(pp.Mapper):
       "blastall.out.tabular": True,
       "blastall.input.file": self.input_file,
       "blastall.output.file": self.output_file,
+      "blastall.evalue": self.evalue,
+      "blastall.gap.cost": self.gap_cost,
+      "blastall.word.size": self.word_size,
+      "blastall.filter": self.filter,
       }
 
   def map(self, ctx):
-    header, seq = ctx.getInputKey(), ctx.getInputValue()
-    if self.compress_header:
-      header = zlib.decompress(header)
-    if self.compress_seq:
-      seq = zlib.decompress(seq)
-
+    header, seq = ctx.getInputValue().rstrip().split("\t", 1)
     # TODO: use stdin/stdout instead
     self.__write_input(header, seq)
     self.engine.blastall(opts=self.opts)
