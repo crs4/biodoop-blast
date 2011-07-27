@@ -13,6 +13,8 @@ Installation:
 
 #. install `Biodoop core <http://biodoop.sourceforge.net>`_
 
+#. get biodoop-blast from the `download page <https://sourceforge.net/projects/biodoop/files/>`_
+
 #. unpack the biodoop-blast tarball, move to the distribution directory
    and run::
 
