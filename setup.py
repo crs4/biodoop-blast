@@ -108,5 +108,6 @@ setup(
     'bl.blast.mr',
     'bl.blast.mr.blastall',
     ],
+  scripts=["scripts/biodoop_blast"],
   cmdclass={"sdist": sdist, "build_py": build_py},
   )

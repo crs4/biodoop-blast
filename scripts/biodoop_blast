@@ -33,7 +33,7 @@ on a machine with the same environment.
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-import sys, os, optparse, ConfigParser, uuid
+import sys, os, optparse, ConfigParser, uuid, collections
 import subprocess as sp
 import pydoop.utils as pu
 import pydoop.hdfs as hdfs
@@ -81,8 +81,11 @@ BLAST_BASE_MR_OPT = {
 
 class Opt(object):
   def update(self, other):
-    new_values = dict((k, v) for (k, v) in other.__dict__.iteritems()
-                      if v is not None)
+    if isinstance(other, collections.Mapping):
+      new_values = other
+    else:
+      new_values = dict((k, v) for (k, v) in other.__dict__.iteritems()
+                        if v is not None)
     self.__dict__.update(new_values)
 
 
@@ -172,6 +175,7 @@ def add_blast_optgroup(parser):
 
 def get_cfg_opt(defaults, config_file):
   opt = Opt()
+  opt.update(defaults)
   config = ConfigParser.SafeConfigParser(defaults)
   config.read(config_file)
   if config.has_section("general"):

@@ -23,3 +23,24 @@ Installation:
      python setup.py install --user
 
    for a local installation
+
+
+Usage
+-----
+
+Here is a quick usage example that can be run on a laptop:
+
+.. code-block:: bash
+
+  $ start-all.sh
+  $ hadoop dfsadmin -safemode wait
+  $ wget ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/chromosomes/*random*
+  $ zcat chr*.gz >genome
+  $ formatdb -p F -o T -i genome
+  $ tar cf genome.tar genome.*
+  $ cat >query.fa
+  >q1
+  ATCGCCTCTCCCGACCGAGCCTTCATGGGAGTCCCGCGGGAGCTGCTCCC
+  >q2
+  TAGAAACTTGCTATTTCAAGTATTGTCATCACCTGGGATCTTGCTCGAAT
+  $ biodoop_blast -o output.csv -p blastn -d genome query.fa genome.tar

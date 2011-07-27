@@ -1,1 +1,2 @@
 include AUTHORS CHANGES COPYING VERSION
+recursive-include docs *
