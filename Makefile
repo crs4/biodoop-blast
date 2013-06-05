@@ -1,3 +1,4 @@
+PY_V := $(shell python -c 'import sys; print "%d.%d" % sys.version_info[:2]')
 EXPORT_DIR = svn_export
 GENERATED_FILES = AUTHORS MANIFEST bl/blast/version.py
 
@@ -49,3 +50,7 @@ clean:
 
 distclean: clean
 	rm -rf $(EXPORT_DIR) dist
+
+uninstall_user:
+	rm -rf ~/.local/lib/python$(PY_V)/site-packages/bl/blast
+	rm -f ~/.local/lib/python$(PY_V)/site-packages/biodoop_blast-*
