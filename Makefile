@@ -5,7 +5,7 @@ NOTICE_TEMPLATE = notice_template.txt
 COPYRIGHTER = copyrighter -p $(APP) -n $(NOTICE_TEMPLATE) $(COPYRIGHT_OWNER)
 # install copyrighter >=0.4.0 from ac-dc/tools/copyrighter
 
-GENERATED_FILES = AUTHORS MANIFEST README bl/blast/version.py
+GENERATED_FILES = AUTHORS MANIFEST bl/blast/version.py
 
 .PHONY: all build build_py install install_py install_user install_user_py docs docs_py docs_put docs_view dist clean distclean
 
